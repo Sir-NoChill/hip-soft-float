@@ -1,59 +1,17 @@
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdio.h>
-// In theory I think this comes from <climits.h>
-#define CHAR_BIT 8
+//===----- lib/fp_add_impl.inc - floaing point addition -----------*- C -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements soft-float addition with the IEEE-754 default rounding
+// (to nearest, ties to even).
+//
+//===----------------------------------------------------------------------===//
 
-typedef uint32_t half_rep_t;
-typedef uint64_t rep_t;
-typedef int64_t srep_t;
-typedef double fp_t;
-#define HALF_REP_C UINT32_C
-#define REP_C UINT64_C
-#define significandBits 52
-
-static inline int rep_clz(rep_t a) { return __builtin_clzll(a); }
-
-#define loWord(a) (a & 0xffffffffU)
-#define hiWord(a) (a >> 32)
-
-#define typeWidth (sizeof(rep_t) * CHAR_BIT)
-
-static __inline rep_t toRep(fp_t x) { //double x
-  const union {
-    fp_t f; //double f
-    rep_t i; //u64 -> so bit cast to double
-  } rep = {.f = x};
-  return rep.i;
-}
-
-static __inline fp_t fromRep(rep_t x) {
-  const union {
-    fp_t f;
-    rep_t i;
-  } rep = {.i = x};
-  return rep.f;
-}
-
-#define exponentBits (typeWidth - significandBits - 1)
-#define maxExponent ((1 << exponentBits) - 1)
-#define exponentBias (maxExponent >> 1)
-
-#define implicitBit (REP_C(1) << significandBits)
-#define significandMask (implicitBit - 1U)
-#define signBit (REP_C(1) << (significandBits + exponentBits))
-#define absMask (signBit - 1U)
-#define exponentMask (absMask ^ significandMask)
-#define oneRep ((rep_t)exponentBias << significandBits)
-#define infRep exponentMask
-#define quietBit (implicitBit >> 1)
-#define qnanRep (exponentMask | quietBit)
-
-static __inline int normalize(rep_t *significand) {
-  const int shift = rep_clz(*significand) - rep_clz(implicitBit);
-  *significand <<= shift;
-  return 1 - shift;
-}
+#include "fp_lib.h"
 
 static __inline fp_t __addXf3__(fp_t a, fp_t b) {
   rep_t aRep = toRep(a); // bitcast to u64 from f64
@@ -62,42 +20,41 @@ static __inline fp_t __addXf3__(fp_t a, fp_t b) {
   const rep_t bAbs = bRep & absMask;
 
   // Detect if a or b is zero, infinity, or NaN.
-  // NOTE: (AA) What if we remove all of this
-  // if (aAbs - REP_C(1) >= infRep - REP_C(1) ||
-  //     bAbs - REP_C(1) >= infRep - REP_C(1)) {
-  //   // NaN + anything = qNaN
-  //   if (aAbs > infRep)
-  //     return fromRep(toRep(a) | quietBit);
-  //   // anything + NaN = qNaN
-  //   if (bAbs > infRep)
-  //     return fromRep(toRep(b) | quietBit);
-  //
-  //   if (aAbs == infRep) {
-  //     // +/-infinity + -/+infinity = qNaN
-  //     if ((toRep(a) ^ toRep(b)) == signBit)
-  //       return fromRep(qnanRep);
-  //     // +/-infinity + anything remaining = +/- infinity
-  //     else
-  //       return a;
-  //   }
-  //
-  //   // anything remaining + +/-infinity = +/-infinity
-  //   if (bAbs == infRep)
-  //     return b;
-  //
-  //   // zero + anything = anything
-  //   if (!aAbs) {
-  //     // We need to get the sign right for zero + zero.
-  //     if (!bAbs)
-  //       return fromRep(toRep(a) & toRep(b));
-  //     else
-  //       return b;
-  //   }
-  //
-  //   // anything + zero = anything
-  //   if (!bAbs)
-  //     return a;
-  // }
+  if (aAbs - REP_C(1) >= infRep - REP_C(1) ||
+      bAbs - REP_C(1) >= infRep - REP_C(1)) {
+    // NaN + anything = qNaN
+    if (aAbs > infRep)
+      return fromRep(toRep(a) | quietBit);
+    // anything + NaN = qNaN
+    if (bAbs > infRep)
+      return fromRep(toRep(b) | quietBit);
+
+    if (aAbs == infRep) {
+      // +/-infinity + -/+infinity = qNaN
+      if ((toRep(a) ^ toRep(b)) == signBit)
+        return fromRep(qnanRep);
+      // +/-infinity + anything remaining = +/- infinity
+      else
+        return a;
+    }
+
+    // anything remaining + +/-infinity = +/-infinity
+    if (bAbs == infRep)
+      return b;
+
+    // zero + anything = anything
+    if (!aAbs) {
+      // We need to get the sign right for zero + zero.
+      if (!bAbs)
+        return fromRep(toRep(a) & toRep(b));
+      else
+        return b;
+    }
+
+    // anything + zero = anything
+    if (!bAbs)
+      return a;
+  }
 
   // Swap a and b if necessary so that a has the larger absolute value.
   if (bAbs > aAbs) {
@@ -113,8 +70,6 @@ static __inline fp_t __addXf3__(fp_t a, fp_t b) {
   rep_t bSignificand = bRep & significandMask;
 
   // Normalize any denormals, and adjust the exponent accordingly.
-  // NOTE: For fluid dynamics we can probably ignore denormals, since
-  //  they are for 1.1754943-38 and smaller. Clamp to zero
   if (aExponent == 0)
     aExponent = normalize(&aSignificand);
   if (bExponent == 0)
@@ -144,7 +99,6 @@ static __inline fp_t __addXf3__(fp_t a, fp_t b) {
       bSignificand = 1; // Set the sticky bit.  b is known to be non-zero.
     }
   }
-  // NOTE: (AA) this can be a bit operation methinks
   if (subtraction) {
     aSignificand -= bSignificand;
     // If a == -b, return +zero.
@@ -171,13 +125,9 @@ static __inline fp_t __addXf3__(fp_t a, fp_t b) {
   }
 
   // If we have overflowed the type, return +/- infinity.
-  // FIXME: (AA) We could have a simplifying assumption
-  //  to assume that it never overflows. 'cause if you 
-  //  overflow in physics, something is wrong
   if (aExponent >= maxExponent)
     return fromRep(infRep | resultSign);
 
-  // FIXME: (AA) Once again, we could simplify this maybe
   if (aExponent <= 0) {
     // The result is denormal before rounding.  The exponent is zero and we
     // need to shift the significand.
@@ -199,15 +149,13 @@ static __inline fp_t __addXf3__(fp_t a, fp_t b) {
 
   // Perform the final rounding.  The result may overflow to infinity, but
   // that is the correct result in that case.
-  // NOTE: (AA) We will always round to the nearest
-
   // switch (__fe_getround()) {
   // case CRT_FE_TONEAREST:
   if (roundGuardSticky > 0x4)
     result++;
   if (roundGuardSticky == 0x4)
     result += result & 1;
-    // break;
+  // break;
   // case CRT_FE_DOWNWARD:
   //   if (resultSign && roundGuardSticky) result++;
   //   break;
@@ -222,11 +170,13 @@ static __inline fp_t __addXf3__(fp_t a, fp_t b) {
   return fromRep(result);
 }
 
-int main() {
-  double a = 2.0;
-  double b = 3.0;
+#include <stdio.h>
 
-  double c = __addXf3__(a, b);
+int main() {
+  fp_t a = 2.0;
+  fp_t b = 3.0;
+
+  fp_t c = __addXf3__(a, b);
 
   printf("From emulation: %f\n", c);
   printf("Expected: %f\n", a + b);
