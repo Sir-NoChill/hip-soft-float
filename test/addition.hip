@@ -4,6 +4,8 @@
 #include <chrono>
 #include <iomanip>
 #include <cstdlib>
+#include <iostream>
+#include "u8_soft_float.hip"
 
 #define HIP_CHECK(call) \
     do { \
@@ -24,7 +26,7 @@ __global__ void kernel_version_1(double* input, double* output, size_t n) {
 __global__ void kernel_version_2(double* input, double* output, size_t n) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
-        output[idx] = input[idx] + output[idx];
+        output[idx] = __addXf4__(input[idx], output[idx]);
     }
 }
 
