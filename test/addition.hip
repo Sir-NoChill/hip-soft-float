@@ -19,7 +19,7 @@
 __global__ void kernel_version_1(float* input, float* output, size_t n) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
-        output[idx] = input[idx] * 2.0;
+        output[idx] = input[idx] + output[idx];
     }
 }
 

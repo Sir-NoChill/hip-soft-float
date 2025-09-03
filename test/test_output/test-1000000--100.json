@@ -1,0 +1,18 @@
+{
+  "device": "AMD Radeon PRO W7900 Dual Slot ",
+  "elements": 1000000,
+  "iterations": 100,
+  "block_size": 256,
+  "grid_size": 3907,
+  "results": {
+    "kernel_v1": {
+      "time_ms": 0.015236,
+      "bandwidth_gb_s": 525.060425
+    },
+    "kernel_v2": {
+      "time_ms": 0.029196,
+      "bandwidth_gb_s": 274.014221
+    },
+    "speedup_v2_over_v1": 0.521872
+  }
+}
